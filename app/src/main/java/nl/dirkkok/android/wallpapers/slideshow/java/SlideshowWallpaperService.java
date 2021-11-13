@@ -4,8 +4,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
-import android.graphics.Paint;
-import android.graphics.Rect;
 import android.os.Environment;
 import android.service.wallpaper.WallpaperService;
 import android.util.Log;
@@ -34,7 +32,6 @@ public class SlideshowWallpaperService extends WallpaperService {
 		private float m_YOffset = 0;
 		private Bitmap m_CurrentBitmap = null;
 		private Date m_BitmapChanged = null;
-		private Date m_LastRedraw = null;
 
 		public SlideshowEngine() {
 			super();
@@ -54,6 +51,9 @@ public class SlideshowWallpaperService extends WallpaperService {
 
 		@Override
 		public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
+			// The offset is provided by the launcher and it is a number between 0 and 1 indicating where the user is.
+			// For example, if you have a horizontal page-based homescreen, and there are 3 pages, then m_XOffset: page 1 is 0, page 2 is 0.5, page 3 is 1.
+			// For vertical launchers I suspect it's the same thing but for m_YOffset.
 			m_XOffset = xOffset;
 			m_YOffset = yOffset;
 			m_DrawThread.requestRedraw();
@@ -64,11 +64,17 @@ public class SlideshowWallpaperService extends WallpaperService {
 			Log.d("SLIDESHOW", String.format("onSurfaceChanged %d %d %d", format, width, height));
 		}
 
+		@Override
+		public void onDestroy() {
+			m_DrawThread.endLoop();
+		}
+
 		private class WallpaperDrawThread extends Thread {
 			private final Object m_DrawLock = new Object();
 			private volatile boolean m_KeepRunning = true; // This is volatile because I couldn't figure out a good way to synchronize access to it.
-			private boolean m_Paused = false;
 			private boolean m_RedrawRequested; // I was able to do it for this one, so it's not volatile.
+			private boolean m_Paused = false;
+			private Date m_LastRedraw = null;
 
 			public void endLoop() {
 				synchronized (m_DrawLock) {
@@ -118,13 +124,15 @@ public class SlideshowWallpaperService extends WallpaperService {
 					// which leads to a very ugly lag in the wallpaper's response to moving around the launcher.
 					//
 					// This means that we need to make sure that any calls to requestRedraw, pause, and unpause, will never run for long.
-					// Unfortunately, drawing the wallpaper takes way too long to avoid that problem. Which is why we do it on a separate thread.
+					// Unfortunately, drawing the wallpaper takes too long to avoid that problem on old devices. Which is why we do it on a separate thread.
 					while (m_KeepRunning) {
 						// If this synchronized would take too long to execute, then the requestRedraw, pause, and unpause functions above
 						// (which execute on the launcher's thread) then they would cause the aforementioned lag.
 						synchronized (m_DrawLock) {
 							m_DrawLock.wait();
 
+							// Don't redraw more than 60 times per second
+							// TODO find out actual refresh rate of display
 							if (m_Paused || !m_RedrawRequested || (m_LastRedraw != null && (new Date().getTime() - m_LastRedraw.getTime()) < 1000 / 60)) {
 								continue;
 							}
@@ -137,26 +145,17 @@ public class SlideshowWallpaperService extends WallpaperService {
 						try {
 							canvas = holder.lockCanvas();
 							Matrix transform = new Matrix();
-							Paint paint = new Paint();
 
 							updateBitmap(canvas.getWidth(), canvas.getHeight());
 
-							// Scale to fill
-							//float scale = Math.max((float) canvas.getWidth() / m_CurrentBitmap.getWidth(), (float) canvas.getHeight() / m_CurrentBitmap.getHeight());
-							//transform.postScale(scale, scale);
-
-							// Offset
+							// The bitmap will always have the exact same width or height as the canvas. (Except maybe off-by-one but idc)
+							// The other dimension will be larger than the canvas's respective dimension.
+							// Therefore one of these parameters will be zero and the other will be negative.
+							// By translating the bitmap by a negative number we move it to the left or up.
+							// See onVisibilityChanged for an explanation of what m_XOffset and m_YOffset are.
 							transform.postTranslate(-m_XOffset * (m_CurrentBitmap.getWidth() - canvas.getWidth()), -m_YOffset * (m_CurrentBitmap.getHeight() - canvas.getHeight()));
 
-							long start = System.currentTimeMillis();
-//							canvas.drawBitmap(
-//								m_CurrentBitmap,
-//								new Rect(0, 0, m_CurrentBitmap.getWidth(), m_CurrentBitmap.getHeight()),
-//								new Rect(0, 0, canvas.getWidth(), canvas.getHeight()),
-//								paint
-//							); // not faster
-							canvas.drawBitmap(m_CurrentBitmap, transform, paint); // 99% of time
-							Log.d("SLIDESHOW", Long.toString(System.currentTimeMillis() - start));
+							canvas.drawBitmap(m_CurrentBitmap, transform, null);
 						} finally {
 							if (canvas != null) {
 								holder.unlockCanvasAndPost(canvas);
