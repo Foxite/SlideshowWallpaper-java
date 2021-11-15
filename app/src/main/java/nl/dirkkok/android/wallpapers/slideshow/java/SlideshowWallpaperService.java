@@ -70,7 +70,7 @@ public class SlideshowWallpaperService extends WallpaperService {
 
 		@Override
 		public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-			Log.d("SLIDESHOW", String.format("onSurfaceChanged %d %d %d", format, width, height));
+			Log.d("SLIDESHOW", String.format("onSurfaceChanged %d %d %d", format, width, height)); // TODO request update from SlideshowThread
 			synchronized (m_DrawLock) {
 				m_Width = width;
 				m_Height = height;
@@ -138,7 +138,7 @@ public class SlideshowWallpaperService extends WallpaperService {
 				synchronized (m_DrawLock) {
 					m_Width = getSurfaceHolder().getSurfaceFrame().width();
 					m_Height = getSurfaceHolder().getSurfaceFrame().height();
-					Log.d("SLIDESHOW", m_Width + " " + m_Height);
+					Log.e("SLIDESHOW", "Fixed width and height " + m_Width + " " + m_Height);
 				}
 			}
 		}
