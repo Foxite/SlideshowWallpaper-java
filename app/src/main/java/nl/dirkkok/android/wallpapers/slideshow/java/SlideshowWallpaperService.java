@@ -30,9 +30,11 @@ public class SlideshowWallpaperService extends WallpaperService {
 		boolean m_Running = true;
 		boolean m_Paused = false;
 
-		final Object m_DrawLock = new Object();
+		final Object m_OffsetLock = new Object();
 		private float m_XOffset = 0;
 		private float m_YOffset = 0;
+
+		final Object m_DrawLock = new Object();
 		private int m_Width = 0;
 		private int m_Height = 0;
 		Bitmap m_CurrentBitmap = null;
@@ -59,11 +61,11 @@ public class SlideshowWallpaperService extends WallpaperService {
 			// The offset is provided by the launcher and it is a number between 0 and 1 indicating where the user is.
 			// For example, if you have a horizontal page-based homescreen, and there are 3 pages, then m_XOffset: page 1 is 0, page 2 is 0.5, page 3 is 1.
 			// For vertical launchers I suspect it's the same thing but for m_YOffset.
-			synchronized (m_DrawLock) {
+			synchronized (m_OffsetLock) {
 				m_XOffset = xOffset;
 				m_YOffset = yOffset;
-				requestRedraw();
 			}
+			requestRedraw();
 		}
 
 		@Override
@@ -124,7 +126,6 @@ public class SlideshowWallpaperService extends WallpaperService {
 			}
 		}
 
-		// The following methods are NOT thread-safe, they must be called from a drawlock-synchronized context.
 		public float getXOffset() {
 			return m_XOffset;
 		}
@@ -134,9 +135,11 @@ public class SlideshowWallpaperService extends WallpaperService {
 
 		private void fixWidthAndHeight() {
 			if (m_Width == 0 || m_Height == 0) {
-				m_Width = getSurfaceHolder().getSurfaceFrame().width();
-				m_Height = getSurfaceHolder().getSurfaceFrame().height();
-				Log.d("SLIDESHOW", m_Width + " " + m_Height);
+				synchronized (m_DrawLock) {
+					m_Width = getSurfaceHolder().getSurfaceFrame().width();
+					m_Height = getSurfaceHolder().getSurfaceFrame().height();
+					Log.d("SLIDESHOW", m_Width + " " + m_Height);
+				}
 			}
 		}
 		public int getWidth() {

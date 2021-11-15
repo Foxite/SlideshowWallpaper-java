@@ -14,6 +14,13 @@ class DrawThread extends Thread {
 	}
 
 	private void drawWallpaper() {
+		float xOffset;
+		float yOffset;
+		synchronized (m_Engine.m_OffsetLock) {
+			xOffset = m_Engine.getXOffset();
+			yOffset = m_Engine.getYOffset();
+		}
+
 		synchronized (m_Engine.m_DrawLock) {
 			SurfaceHolder holder = m_Engine.getSurfaceHolder();
 			Canvas canvas = null;
@@ -26,7 +33,7 @@ class DrawThread extends Thread {
 				// By translating the bitmap by a negative number we move it to the left or up.
 				// See onVisibilityChanged for an explanation of what m_XOffset and m_YOffset are.
 				Matrix currentTransform = new Matrix();
-				currentTransform.postTranslate(-m_Engine.getXOffset() * (m_Engine.m_CurrentBitmap.getWidth() - m_Engine.getWidth()), -m_Engine.getYOffset() * (m_Engine.m_CurrentBitmap.getHeight() - m_Engine.getHeight()));
+				currentTransform.postTranslate(-xOffset * (m_Engine.m_CurrentBitmap.getWidth() - m_Engine.getWidth()), -yOffset * (m_Engine.m_CurrentBitmap.getHeight() - m_Engine.getHeight()));
 
 				canvas.drawBitmap(m_Engine.m_CurrentBitmap, currentTransform, null);
 
@@ -40,7 +47,7 @@ class DrawThread extends Thread {
 						m_Engine.m_PreviousBitmapPaint.setAlpha(alpha);
 
 						Matrix previousTransform = new Matrix();
-						previousTransform.postTranslate(-m_Engine.getXOffset() * (m_Engine.m_PreviousBitmap.getWidth() - m_Engine.getWidth()), -m_Engine.getYOffset() * (m_Engine.m_PreviousBitmap.getHeight() - m_Engine.getHeight()));
+						previousTransform.postTranslate(-xOffset * (m_Engine.m_PreviousBitmap.getWidth() - m_Engine.getWidth()), -yOffset * (m_Engine.m_PreviousBitmap.getHeight() - m_Engine.getHeight()));
 
 						canvas.drawBitmap(m_Engine.m_PreviousBitmap, previousTransform, m_Engine.m_PreviousBitmapPaint);
 					}

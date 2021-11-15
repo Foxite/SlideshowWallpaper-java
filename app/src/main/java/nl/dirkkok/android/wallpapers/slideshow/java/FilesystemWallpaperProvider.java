@@ -24,7 +24,7 @@ public class FilesystemWallpaperProvider implements WallpaperProvider {
 		File[] files = m_Folder.listFiles(File::isFile);
 		assert files != null; // listFiles returns null if you're not calling it on a folder. but we check if it's a directory in the constructor
 		assert files.length > 0;
-		if (m_Index > files.length) {
+		if (m_Index >= files.length) {
 			m_Index = 0;
 		}
 		File selected = files[this.m_Index];
