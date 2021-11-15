@@ -57,6 +57,11 @@ class SlideshowThread extends Thread {
 		try {
 			updateBitmap();
 			while (m_Engine.m_Running) {
+				synchronized (m_Engine.m_MessageLock) {
+					while (m_Engine.m_Paused) {
+						m_Engine.m_MessageLock.wait();
+					}
+				}
 				long millisToWait = calculateMillisToWait();
 				if (millisToWait > 0) {
 					synchronized (m_Engine.m_MessageLock) {
