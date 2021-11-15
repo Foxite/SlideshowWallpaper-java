@@ -1,18 +1,13 @@
 package nl.dirkkok.android.wallpapers.slideshow.java;
 
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.os.Environment;
 import android.service.wallpaper.WallpaperService;
 import android.util.Log;
 import android.view.SurfaceHolder;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Date;
 
 public class SlideshowWallpaperService extends WallpaperService {
 	private final WallpaperProvider m_Provider;
@@ -26,26 +21,36 @@ public class SlideshowWallpaperService extends WallpaperService {
 		return new SlideshowEngine();
 	}
 
-	private class SlideshowEngine extends WallpaperService.Engine {
-		private final WallpaperDrawThread m_DrawThread;
+	class SlideshowEngine extends WallpaperService.Engine {
+		private final Object m_StartLock = new Object();
+		private DrawThread m_DrawThread;
+		private SlideshowThread m_SlideshowThread;
+
+		final Object m_MessageLock = new Object();
+		boolean m_Running = true;
+		boolean m_Paused = false;
+
+		final Object m_DrawLock = new Object();
 		private float m_XOffset = 0;
 		private float m_YOffset = 0;
-		private Bitmap m_CurrentBitmap = null;
-		private Date m_BitmapChanged = null;
+		private int m_Width = 0;
+		private int m_Height = 0;
+		Bitmap m_CurrentBitmap = null;
+		Bitmap m_PreviousBitmap = null;
+		Paint m_PreviousBitmapPaint; // The current bitmap is always drawn using alpha = 1. The previous bitmap, if there is one, will be drawn on top of it using this alpha value.
 
 		public SlideshowEngine() {
 			super();
-			m_DrawThread = new WallpaperDrawThread();
-			m_DrawThread.start();
+			m_PreviousBitmapPaint = new Paint();
+			m_PreviousBitmapPaint.setAlpha(0);
 		}
 
 		@Override
 		public void onVisibilityChanged(boolean visible) {
 			if (visible) {
-				m_DrawThread.unpause();
-				m_DrawThread.requestRedraw();
+				unpause();
 			} else {
-				m_DrawThread.pause();
+				pause();
 			}
 		}
 
@@ -54,118 +59,97 @@ public class SlideshowWallpaperService extends WallpaperService {
 			// The offset is provided by the launcher and it is a number between 0 and 1 indicating where the user is.
 			// For example, if you have a horizontal page-based homescreen, and there are 3 pages, then m_XOffset: page 1 is 0, page 2 is 0.5, page 3 is 1.
 			// For vertical launchers I suspect it's the same thing but for m_YOffset.
-			m_XOffset = xOffset;
-			m_YOffset = yOffset;
-			m_DrawThread.requestRedraw();
+			synchronized (m_DrawLock) {
+				m_XOffset = xOffset;
+				m_YOffset = yOffset;
+				requestRedraw();
+			}
 		}
 
 		@Override
 		public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
 			Log.d("SLIDESHOW", String.format("onSurfaceChanged %d %d %d", format, width, height));
+			synchronized (m_DrawLock) {
+				m_Width = width;
+				m_Height = height;
+			}
+
+			synchronized (m_StartLock) {
+				if (m_DrawThread == null) {
+					m_SlideshowThread = new SlideshowThread(this);
+					m_SlideshowThread.start();
+
+					m_DrawThread = new DrawThread(this);
+					m_DrawThread.start();
+				}
+			}
+			requestRedraw();
 		}
 
 		@Override
 		public void onDestroy() {
-			m_DrawThread.endLoop();
+			endLoop();
 		}
 
-		private class WallpaperDrawThread extends Thread {
-			private final Object m_DrawLock = new Object();
-			private volatile boolean m_KeepRunning = true; // This is volatile because I couldn't figure out a good way to synchronize access to it.
-			private boolean m_RedrawRequested; // I was able to do it for this one, so it's not volatile.
-			private boolean m_Paused = false;
-			private Date m_LastRedraw = null;
-
-			public void endLoop() {
-				synchronized (m_DrawLock) {
-					m_KeepRunning = false;
-					m_DrawLock.notify();
-				}
+		// The following methods are thread-safe.
+		public void endLoop() {
+			synchronized (m_MessageLock) {
+				m_Running = false;
+				m_MessageLock.notify();
 			}
-
-			public void requestRedraw() {
-				synchronized (m_DrawLock) {
-					m_RedrawRequested = true;
-					m_DrawLock.notify();
-				}
+			synchronized (m_DrawLock) {
+				// Make sure this method doesn't return while the draw thread is drawing
 			}
+		}
 
-			public void pause() {
-				synchronized (m_DrawLock) {
-					m_Paused = true;
-					m_DrawLock.notify();
-				}
+		public void requestRedraw() {
+			synchronized (m_MessageLock) {
+				m_DrawThread.m_RedrawRequested = true;
+				m_MessageLock.notify();
 			}
+		}
 
-			public void unpause() {
-				synchronized (m_DrawLock) {
-					m_Paused = false;
-					m_DrawLock.notify();
-				}
+		public void pause() {
+			synchronized (m_MessageLock) {
+				m_Paused = true;
+				m_MessageLock.notify();
 			}
+		}
 
-			private void updateBitmap(float canvasWidth, float canvasHeight) {
-				if (m_CurrentBitmap == null || m_BitmapChanged == null) { // || (new Date().getTime() - m_BitmapChanged.getTime()) > 60 * 1000
-					m_BitmapChanged = new Date();
-					try (InputStream inputStream = m_Provider.getNextImage()) {
-						Bitmap unscaledBitmap = BitmapFactory.decodeStream(inputStream);
-						float scale = Math.max(canvasWidth / unscaledBitmap.getWidth(), canvasHeight / unscaledBitmap.getHeight());
-						m_CurrentBitmap = Bitmap.createScaledBitmap(unscaledBitmap, (int) (unscaledBitmap.getWidth() * scale), (int) (unscaledBitmap.getHeight() * scale), true);
-					} catch (IOException e) {
-						throw new RuntimeException(e);
-					}
-				}
+		public void unpause() {
+			synchronized (m_MessageLock) {
+				m_Paused = false;
+				m_DrawThread.m_RedrawRequested = true;
+				m_MessageLock.notify();
 			}
+		}
 
-			@Override
-			public void run() {
-				try {
-					// If the launcher's calls to the engine take too long they end up being "queued",
-					// which leads to a very ugly lag in the wallpaper's response to moving around the launcher.
-					//
-					// This means that we need to make sure that any calls to requestRedraw, pause, and unpause, will never run for long.
-					// Unfortunately, drawing the wallpaper takes too long to avoid that problem on old devices. Which is why we do it on a separate thread.
-					while (m_KeepRunning) {
-						// If this synchronized would take too long to execute, then the requestRedraw, pause, and unpause functions above
-						// (which execute on the launcher's thread) then they would cause the aforementioned lag.
-						synchronized (m_DrawLock) {
-							m_DrawLock.wait();
+		// The following methods are NOT thread-safe, they must be called from a drawlock-synchronized context.
+		public float getXOffset() {
+			return m_XOffset;
+		}
+		public float getYOffset() {
+			return m_YOffset;
+		}
 
-							// Don't redraw more than 60 times per second
-							// TODO find out actual refresh rate of display
-							if (m_Paused || !m_RedrawRequested || (m_LastRedraw != null && (new Date().getTime() - m_LastRedraw.getTime()) < 1000 / 60)) {
-								continue;
-							}
-							m_RedrawRequested = false;
-						}
-						m_LastRedraw = new Date();
-
-						SurfaceHolder holder = getSurfaceHolder();
-						Canvas canvas = null;
-						try {
-							canvas = holder.lockCanvas();
-							Matrix transform = new Matrix();
-
-							updateBitmap(canvas.getWidth(), canvas.getHeight());
-
-							// The bitmap will always have the exact same width or height as the canvas. (Except maybe off-by-one but idc)
-							// The other dimension will be larger than the canvas's respective dimension.
-							// Therefore one of these parameters will be zero and the other will be negative.
-							// By translating the bitmap by a negative number we move it to the left or up.
-							// See onVisibilityChanged for an explanation of what m_XOffset and m_YOffset are.
-							transform.postTranslate(-m_XOffset * (m_CurrentBitmap.getWidth() - canvas.getWidth()), -m_YOffset * (m_CurrentBitmap.getHeight() - canvas.getHeight()));
-
-							canvas.drawBitmap(m_CurrentBitmap, transform, null);
-						} finally {
-							if (canvas != null) {
-								holder.unlockCanvasAndPost(canvas);
-							}
-						}
-					}
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
+		private void fixWidthAndHeight() {
+			if (m_Width == 0 || m_Height == 0) {
+				m_Width = getSurfaceHolder().getSurfaceFrame().width();
+				m_Height = getSurfaceHolder().getSurfaceFrame().height();
+				Log.d("SLIDESHOW", m_Width + " " + m_Height);
 			}
+		}
+		public int getWidth() {
+			fixWidthAndHeight();
+			return m_Width;
+		}
+		public int getHeight() {
+			fixWidthAndHeight();
+			return m_Height;
+		}
+
+		public WallpaperProvider getProvider() {
+			return m_Provider;
 		}
 	}
 }
