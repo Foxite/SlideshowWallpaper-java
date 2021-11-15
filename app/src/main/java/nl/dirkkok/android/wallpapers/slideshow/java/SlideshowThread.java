@@ -39,7 +39,7 @@ class SlideshowThread extends Thread {
 
 			m_Engine.m_PreviousBitmap = m_Engine.m_CurrentBitmap;
 			m_Engine.m_CurrentBitmap = newBitmap;
-			m_Engine.m_PreviousBitmapPaint.setAlpha(1);
+			m_Engine.m_PreviousBitmapPaint.setAlpha(255);
 		}
 		m_BitmapChanged = System.currentTimeMillis();
 
@@ -55,7 +55,14 @@ class SlideshowThread extends Thread {
 	@Override
 	public void run() {
 		try {
+			// TODO draw loading icon:
+			// 1. start draw thread
+			// 2. modify it to draw a spinner while the bitmap is null
+			// 3. updateBitmap()
+			// 4. the rest
 			updateBitmap();
+			m_Engine.m_DrawThread = new DrawThread(m_Engine);
+			m_Engine.m_DrawThread.start();
 			while (m_Engine.m_Running) {
 				synchronized (m_Engine.m_MessageLock) {
 					while (m_Engine.m_Paused) {

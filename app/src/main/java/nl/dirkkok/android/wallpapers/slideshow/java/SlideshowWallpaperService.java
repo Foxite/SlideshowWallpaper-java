@@ -22,9 +22,8 @@ public class SlideshowWallpaperService extends WallpaperService {
 	}
 
 	class SlideshowEngine extends WallpaperService.Engine {
-		private final Object m_StartLock = new Object();
-		private DrawThread m_DrawThread;
-		private SlideshowThread m_SlideshowThread;
+		DrawThread m_DrawThread;
+		SlideshowThread m_SlideshowThread;
 
 		final Object m_MessageLock = new Object();
 		boolean m_Running = true;
@@ -76,14 +75,9 @@ public class SlideshowWallpaperService extends WallpaperService {
 				m_Height = height;
 			}
 
-			synchronized (m_StartLock) {
-				if (m_DrawThread == null) {
-					m_SlideshowThread = new SlideshowThread(this);
-					m_SlideshowThread.start();
-
-					m_DrawThread = new DrawThread(this);
-					m_DrawThread.start();
-				}
+			if (m_SlideshowThread == null) {
+				m_SlideshowThread = new SlideshowThread(this);
+				m_SlideshowThread.start();
 			}
 			requestRedraw();
 		}
@@ -97,7 +91,7 @@ public class SlideshowWallpaperService extends WallpaperService {
 		public void endLoop() {
 			synchronized (m_MessageLock) {
 				m_Running = false;
-				m_MessageLock.notify();
+				m_MessageLock.notifyAll();
 			}
 			synchronized (m_DrawLock) {
 				// Make sure this method doesn't return while the draw thread is drawing
@@ -106,23 +100,24 @@ public class SlideshowWallpaperService extends WallpaperService {
 
 		public void requestRedraw() {
 			synchronized (m_MessageLock) {
-				m_DrawThread.m_RedrawRequested = true;
-				m_MessageLock.notify();
+				if (m_DrawThread != null) {
+					m_DrawThread.m_RedrawRequested = true;
+					m_MessageLock.notifyAll();
+				}
 			}
 		}
 
 		public void pause() {
 			synchronized (m_MessageLock) {
 				m_Paused = true;
-				m_MessageLock.notify();
+				m_MessageLock.notifyAll();
 			}
 		}
 
 		public void unpause() {
 			synchronized (m_MessageLock) {
 				m_Paused = false;
-				m_DrawThread.m_RedrawRequested = true;
-				m_MessageLock.notify();
+				requestRedraw();
 			}
 		}
 
