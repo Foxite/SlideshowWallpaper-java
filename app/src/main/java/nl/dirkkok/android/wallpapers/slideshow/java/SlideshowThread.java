@@ -2,6 +2,7 @@ package nl.dirkkok.android.wallpapers.slideshow.java;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.util.Log;
 
 import java.io.IOException;
 import java.io.InputStream;

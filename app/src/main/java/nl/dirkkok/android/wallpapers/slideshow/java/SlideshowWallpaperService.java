@@ -87,7 +87,6 @@ public class SlideshowWallpaperService extends WallpaperService {
 			endLoop();
 		}
 
-		// The following methods are thread-safe.
 		public void endLoop() {
 			synchronized (m_MessageLock) {
 				m_Running = false;
